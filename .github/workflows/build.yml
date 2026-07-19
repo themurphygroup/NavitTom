@@ -1,0 +1,55 @@
+name: build-ttsystem
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to publish the Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ttsystem inside Ubuntu 18.04
+        run: |
+          set -e
+          docker run --rm -v "$PWD":/work -w /work ubuntu:18.04 bash -c '
+            set -e
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              git build-essential libglib2.0-dev unzip gawk wget libtool fluid \
+              imagemagick pkg-config librsvg2-bin xsltproc lib32z1 chrpath cmake \
+              kmod autoconf ca-certificates subversion mercurial file cpio bc rsync
+            export ROOT=$(pwd)
+            source get_cross_env.sh
+            # Only the base system is needed to boot into Navit (skip make extra / games)
+            make base 2>&1 | tee build_base.log
+            mkdir -p out
+            cp build/ttsystem out/ttsystem
+            cp -r opentom_dist out/opentom
+            cd out && tar -czf ../opentom.tar.gz . && cd ..
+            ls -la out opentom.tar.gz
+          '
+
+      - name: Upload build artifact (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            opentom.tar.gz
+            build_base.log
+          if-no-files-found: warn
+
+      - name: Publish Release (on success)
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ttsystem-latest
+          name: NavitTom ttsystem (auto build)
+          files: opentom.tar.gz
+          fail_on_unmatched_files: true
